@@ -24,3 +24,6 @@ Thumbs.db
 
 # Context file (internal documentation)
 context.md
+.kimi/
+# Internal planning files
+.kimi/

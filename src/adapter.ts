@@ -5,6 +5,54 @@
 
 import { Readable, Writable } from "node:stream";
 
+/**
+ * Readable proxy minimalista para requisições sem body.
+ * Evita alocar um Readable do Node.js quando não há dados a fluir.
+ */
+class EmptyReadable {
+  url: string;
+  method: string;
+  headers: Record<string, string | string[]>;
+  private _endListeners: Array<() => void> = [];
+
+  constructor(bunReq: Request) {
+    const parsed = new URL(bunReq.url);
+    this.url = parsed.pathname + parsed.search;
+    this.method = bunReq.method;
+    this.headers = {};
+
+    bunReq.headers.forEach((value, key) => {
+      const k = key.toLowerCase();
+      const existing = this.headers[k];
+      if (Array.isArray(existing)) {
+        this.headers[k] = [...existing, value];
+      } else if (existing !== undefined) {
+        this.headers[k] = [existing, value];
+      } else {
+        this.headers[k] = value;
+      }
+    });
+
+    queueMicrotask(() => this._emitEnd());
+  }
+
+  on(event: string, listener: (...args: any[]) => void) {
+    if (event === "end") this._endListeners.push(listener as any);
+    return this;
+  }
+
+  pipe(destination: any) {
+    queueMicrotask(() => {
+      if (typeof destination.end === "function") destination.end();
+    });
+    return destination;
+  }
+
+  private _emitEnd() {
+    this._endListeners.forEach((l) => l());
+  }
+}
+
 class MockNodeRequest {
   url: string;
   method: string;
@@ -47,7 +95,8 @@ class MockNodeRequest {
 class MockNodeResponse extends Writable {
   statusCode = 200;
   private headers: Record<string, string | string[]> = {};
-  private chunks: Buffer[] = [];
+  private chunks: (Buffer | string)[] = [];
+  private _allStrings = true;
   writableEnded = false;
 
   constructor() {
@@ -55,7 +104,10 @@ class MockNodeResponse extends Writable {
   }
 
   _write(chunk: any, _encoding: BufferEncoding, callback: (error?: Error | null) => void) {
-    this.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    if (this._allStrings && typeof chunk !== "string") {
+      this._allStrings = false;
+    }
+    this.chunks.push(Buffer.isBuffer(chunk) ? chunk : chunk);
     callback();
   }
 
@@ -70,7 +122,9 @@ class MockNodeResponse extends Writable {
   writeHead(statusCode: number, headers?: Record<string, string>) {
     this.statusCode = statusCode;
     if (headers) {
-      Object.entries(headers).forEach(([k, v]) => this.setHeader(k, v));
+      for (const [k, v] of Object.entries(headers)) {
+        this.setHeader(k, v);
+      }
     }
   }
 
@@ -84,21 +138,31 @@ class MockNodeResponse extends Writable {
 
   toResponse(): Response {
     const headers = new Headers();
-    Object.entries(this.headers).forEach(([k, v]) => {
+    for (const [k, v] of Object.entries(this.headers)) {
       if (Array.isArray(v)) {
-        v.forEach((val) => headers.append(k, val));
+        for (const val of v) headers.append(k, val);
       } else {
         headers.set(k, v);
       }
-    });
+    }
 
-    const body = this.chunks.length > 0 ? Buffer.concat(this.chunks) : null;
+    let body: BodyInit | null = null;
+    if (this.chunks.length > 0) {
+      body = this._allStrings
+        ? (this.chunks as string[]).join("")
+        : Buffer.concat(this.chunks.map((c) =>
+            typeof c === "string" ? Buffer.from(c) : c
+          ));
+    }
     return new Response(body, { status: this.statusCode, headers });
   }
 }
 
 export function createNodeContext(bunReq: Request) {
-  const req = new MockNodeRequest(bunReq) as any;
+  const hasBody = bunReq.body !== null;
+  const req = hasBody
+    ? new MockNodeRequest(bunReq) as any
+    : new EmptyReadable(bunReq) as any;
   const res = new MockNodeResponse() as any;
 
   let resolved = false;

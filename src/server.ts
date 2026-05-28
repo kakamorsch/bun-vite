@@ -7,6 +7,29 @@
 
 import { createServer, type ViteDevServer } from "vite";
 import { createNodeContext } from "./adapter.ts";
+import { resolve, extname } from "node:path";
+
+const STATIC_EXT = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  ".mp4", ".webm", ".mp3", ".ogg", ".wav",
+  ".pdf", ".zip", ".tar", ".gz",
+]);
+
+const VITE_DEPS_MARKER = "/.vite/deps/";
+
+function isStaticPath(pathname: string): boolean {
+  if (pathname.includes("?")) return false;
+  const ext = extname(pathname);
+  return STATIC_EXT.has(ext) || pathname.includes(VITE_DEPS_MARKER);
+}
+
+function mapToFilePath(pathname: string, root: string): string {
+  if (pathname.startsWith("/@fs/")) {
+    return pathname.slice(5);
+  }
+  return resolve(root, pathname.slice(1));
+}
 
 export async function startServer(
   root: string,
@@ -42,6 +65,18 @@ export async function startServer(
   const server = Bun.serve({
     port,
     async fetch(req) {
+      const url = new URL(req.url);
+      const pathname = url.pathname;
+
+      // Fast-path: ativos estáticos servidos diretamente via Bun.file()
+      if (isStaticPath(pathname)) {
+        const filePath = mapToFilePath(pathname, root);
+        const file = Bun.file(filePath);
+        if (await file.exists()) {
+          return new Response(file);
+        }
+      }
+
       const { req: nodeReq, res: nodeRes, responsePromise } =
         createNodeContext(req);
 
