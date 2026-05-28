@@ -5,36 +5,38 @@
  */
 
 import { createServer, type ViteDevServer } from "vite";
-import vue from "@vitejs/plugin-vue";
 import { createNodeContext } from "./adapter.ts";
+
+function isObject(item: any): item is Record<string, any> {
+  return item && typeof item === "object" && !Array.isArray(item);
+}
+
+function deepMerge(target: Record<string, any>, source: Record<string, any>): Record<string, any> {
+  const output = { ...target };
+  for (const key of Object.keys(source)) {
+    if (isObject(source[key]) && isObject(output[key])) {
+      output[key] = deepMerge(output[key], source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
+}
 
 export async function startServer(
   root: string,
   port = 3000,
   viteOverrides?: Record<string, any>
 ) {
-  const config: Record<string, any> = {
+  const baseConfig: Record<string, any> = {
     root,
     server: {
       middlewareMode: true,
       hmr: { port: port + 1 },
     },
-    plugins: [vue()],
   };
 
-  if (viteOverrides) {
-    if (viteOverrides.server) {
-      config.server = { ...config.server, ...viteOverrides.server };
-      if (viteOverrides.server.hmr) {
-        config.server.hmr = { ...config.server.hmr, ...viteOverrides.server.hmr };
-      }
-    }
-    for (const key of Object.keys(viteOverrides)) {
-      if (key !== "server") {
-        config[key] = viteOverrides[key];
-      }
-    }
-  }
+  const config = viteOverrides ? deepMerge(baseConfig, viteOverrides) : baseConfig;
 
   const vite: ViteDevServer = await createServer(config);
 
