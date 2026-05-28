@@ -7,12 +7,14 @@
     "bun-vite-hybrid": "src/cli.ts"
   },
   "scripts": {
-    "dev": "bun run src/cli.ts dev"
+    "dev": "bun run src/cli.ts dev",
+    "benchmark": "bun run scripts/benchmark.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^25.9.1",
     "@vitejs/plugin-vue": "^6.0.7",
+    "autocannon": "^8.0.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
