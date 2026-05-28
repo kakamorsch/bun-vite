@@ -151,10 +151,12 @@ async function runBenchmark(): Promise<void> {
     console.log("⚡ Vite (Node) ignorado — Node.js >= 20 necessário\n");
   }
 
-  // 4. Cleanup
-  hybrid.proc.kill();
-  if (node) node.proc.kill();
-  await Promise.all([hybrid.proc.exited, node?.proc.exited].filter(Boolean));
+  // 4. Cleanup — SIGKILL para garantir que não fiquem zumbis
+  try { hybrid.proc.kill(9); } catch {}
+  if (node) try { node.proc.kill(9); } catch {}
+  await Bun.sleep(500);
+  killPort(HYBRID_PORT);
+  killPort(NODE_PORT);
 
   // 5. Resultados
   const hybridResult: ServerResult = {
@@ -209,4 +211,5 @@ function printSingleResult(h: ServerResult): void {
 
 if (import.meta.main) {
   await runBenchmark();
+  process.exit(0);
 }
